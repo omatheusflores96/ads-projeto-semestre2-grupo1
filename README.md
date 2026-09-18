@@ -8,8 +8,8 @@ Desenvolvimento de uma solução em Python para otimização de processos e aná
 | :--- | :--- | :--- | :--- |
 | Matheus de Almeida Flores | 202502541831 | @omatheusflores96 | Desenvolvedor |
 | Igor Esteferson Vacario | 202503944202 | @IgorVacario | Desenvolvedor |
-| Klaydiana da Silva Medeiros | [Matrícula Klaydiana] | @[UsuarioKlaydiana] | Gerente de Projeto |
-| Maria Eloisa de Oliveira Freitas | [Matrícula Maria] | @[UsuarioMaria] | Analista de Negócio |
+| Klaydiana da Silva Medeiros | 202502264811 | @daianamedeirossilva86-svg | Gerente de Projeto |
+| Maria Eloisa de Oliveira Freitas | 202408452969 | @Maria20241413 | Analista de Negócio |
 
 ## Stack Tecnológica
 * **Linguagem:** Python
