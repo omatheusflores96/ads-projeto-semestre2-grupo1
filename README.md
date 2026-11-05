@@ -1,7 +1,7 @@
 # [ADS2] Projeto Integrador - Big Data com Python em Empresa Parceira
 
 ## Resumo do Projeto
-Desenvolvimento de uma solução em Python para otimização de processos e análise de dados da empresa parceira (setor de confeitaria), com foco em controle de insumos, precificação e análise de vendas.
+Desenvolvimento de uma solução em Python para automação de processos na empresa parceira (setor de confeitaria), voltada para o registro e gestão de relacionamento com clientes (fidelização).
 
 ## Integrantes e Responsabilidades
 | Nome Completo | Matrícula | Usuário GitHub | Função no Projeto |
