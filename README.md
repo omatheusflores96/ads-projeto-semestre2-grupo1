@@ -13,8 +13,8 @@ Desenvolvimento de uma solução em Python para automação de processos na empr
 
 ## Stack Tecnológica
 * **Linguagem:** Python
-* **Gestão e Versão:** Git, GitHub, Trello e Slack
-* **Banco de Dados / Big Data:** SQLite / Pandas / Flask
+* **Gestão e Versão:** Git, GitHub, Trello e Teams
+* **Banco de Dados / Big Data:** Excel / Pandas
 
 ## Como executar localmente
 1. Clone o repositório:
