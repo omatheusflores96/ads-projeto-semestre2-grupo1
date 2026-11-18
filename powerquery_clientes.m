@@ -1,9 +1,10 @@
+// CRIE ESTA CONSULTA DEPOIS da consulta "Contatos" (powerquery_contatos.m) e dê a ela o nome: Clientes
 // Power BI: Obter dados > Consulta em branco > Editor Avançado > colar este código.
 // Troque o caminho do arquivo pelo local real do clientes.xlsx.
 let
     // Abre o arquivo Excel (TROQUE o caminho pelo local real do seu clientes.xlsx)
     Fonte = Excel.Workbook(File.Contents("C:\BolosDaLyz\clientes.xlsx"), null, true),
-    // Seleciona a aba chamada "clientes" (mesmo nome usado pelo Python)
+    // Seleciona a aba chamada "clientes"
     Aba = Fonte{[Item = "clientes", Kind = "Sheet"]}[Data],
     // Transforma a primeira linha em cabeçalho (nome, telefone, dia, mes)
     Cabecalho = Table.PromoteHeaders(Aba, [PromoteAllScalars = true]),
@@ -20,12 +21,11 @@ let
         "proximo_aniversario",
         each
             let
-                // Função que monta o aniversário em um ano; 29/02 em ano não bissexto vira 28/02
+                // Monta o aniversário em um ano; 29/02 em ano não bissexto vira 28/02
                 f = (ano as number) as date =>
                     if _[mes] = 2 and _[dia] = 29 and not Date.IsLeapYear(ano)
                     then #date(ano, 2, 28)
                     else #date(ano, _[mes], _[dia]),
-                // Aniversário no ano atual
                 esteAno = f(Date.Year(Hoje))
             in
                 // Se ainda não passou (ou é hoje) usa este ano; senão, o ano seguinte
@@ -45,7 +45,22 @@ let
             else if [dias_restantes] <= 60 then "ATENÇÃO (60 dias)"
             else "Fora da janela",
         type text
+    ),
+    // Nova coluna: situação do contato NESTE aniversário (procura na consulta "Contatos")
+    Contato = Table.AddColumn(
+        Status,
+        "contato",
+        each
+            let
+                ano = Date.Year([proximo_aniversario]),
+                // Contatos deste cliente feitos para o aniversário deste ano
+                achou = Table.SelectRows(Contatos, (c) => c[telefone] = _[telefone] and c[ano_aniversario] = ano)
+            in
+                if Table.IsEmpty(achou) then "Não contatado"
+                else if achou{0}[pedido_confirmado] = "Sim" then "Pedido confirmado"
+                else if achou{0}[pedido_confirmado] = "Não" then "Sem pedido"
+                else "Aguardando resposta",
+        type text
     )
 in
-    // Resultado final: a tabela completa, com as 3 colunas calculadas
-    Status
+    Contato

@@ -1,0 +1,25 @@
+// Medidas do Power BI (RF08 e indicadores do painel).
+// Como criar: guia Modelagem > Nova medida > colar UMA medida por vez.
+// Formate "Taxa de Conversão" como porcentagem (guia Ferramentas de medida > Formato > Porcentagem).
+
+Contatos Feitos = COUNTROWS(Contatos)
+
+Pedidos Confirmados =
+CALCULATE(COUNTROWS(Contatos), Contatos[pedido_confirmado] = "Sim")
+
+Taxa de Conversão =
+DIVIDE([Pedidos Confirmados], [Contatos Feitos], 0)
+
+Urgentes a Contatar =
+CALCULATE(
+    COUNTROWS(Clientes),
+    Clientes[status] = "URGENTE (30 dias)",
+    Clientes[contato] = "Não contatado"
+)
+
+Atenção a Contatar =
+CALCULATE(
+    COUNTROWS(Clientes),
+    Clientes[status] = "ATENÇÃO (60 dias)",
+    Clientes[contato] = "Não contatado"
+)
