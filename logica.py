@@ -1,6 +1,9 @@
-"""Regras de negócio do sistema de aniversários - Bolos da Lyz (versão 2)."""
+"""Regras de negócio do sistema de aniversários - Bolos da Lyz (versão 3)."""
 # Bibliotecas padrão do Python
+import calendar            # saber se um ano é bissexto
 import io                  # cria um "arquivo na memória" (usado na exportação para Excel)
+import logging             # registra os erros no terminal para facilitar a manutenção
+import os                  # variáveis de ambiente e troca segura de arquivos
 import re                  # expressões regulares (usada para limpar o telefone)
 import urllib.parse        # codifica o texto da mensagem para virar parte de um link
 from datetime import date  # trabalhar com datas
@@ -9,8 +12,11 @@ from pathlib import Path   # representar o caminho do arquivo de forma segura
 # Biblioteca externa: Pandas, usada para ler/gravar o Excel e manipular as tabelas
 import pandas as pd
 
+logger = logging.getLogger("bolos_da_lyz")
+
 # ---------- Configurações do arquivo ----------
-ARQUIVO = Path("clientes.xlsx")   # arquivo Excel onde ficam os dados (na mesma pasta do app)
+# Caminho do Excel: pode ser trocado pela variável de ambiente CLIENTES_XLSX
+ARQUIVO = Path(os.environ.get("CLIENTES_XLSX", "clientes.xlsx"))
 ABA = "clientes"                  # aba com a lista de clientes
 ABA_CONTATOS = "contatos"         # aba com o histórico de contatos e pedidos (RF08)
 COLUNAS = ["nome", "telefone", "dia", "mes"]
@@ -25,6 +31,13 @@ TEXTO_CONTATO = {
     "Sim": "Pedido confirmado",
     "Não": "Sem pedido",
 }
+
+
+class ErroDeDados(Exception):
+    """Problema com o arquivo de dados (corrompido, aba ou coluna ausente).
+
+    A mensagem já é amigável: o app mostra o texto direto para a confeiteira.
+    """
 
 
 # ---------- Validações (RNF04) ----------
@@ -63,37 +76,117 @@ def _validar_dados(nome: str, tel: str, dia: int, mes: int):
     return None
 
 
+def separar_validas(df: pd.DataFrame):
+    """Separa as linhas válidas das inválidas da lista de clientes.
+
+    Serve para o caso de dados digitados direto na planilha, sem passar pelas validações
+    do formulário. Retorna (validas, invalidas):
+    - validas: linhas já normalizadas (nome sem espaços extras, telefone só com dígitos, dia/mês inteiros);
+    - invalidas: as linhas originais, com a coluna "motivo".
+    """
+    nome = df["nome"].fillna("").astype(str).str.strip()
+    # O "[.]0$" remove o ".0" que aparece quando o Excel guarda o telefone como número decimal
+    tel = df["telefone"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).map(limpar_telefone)
+    dia = pd.to_numeric(df["dia"], errors="coerce")
+    mes = pd.to_numeric(df["mes"], errors="coerce")
+
+    motivos = []
+    vistos = set()  # telefones já vistos, para achar duplicados
+    for i in range(len(df)):
+        if not nome.iloc[i]:
+            motivo = "nome vazio"
+        elif not telefone_valido(tel.iloc[i]):
+            motivo = "telefone inválido"
+        elif pd.isna(dia.iloc[i]) or pd.isna(mes.iloc[i]) or not data_valida(dia.iloc[i], mes.iloc[i]):
+            motivo = "data de aniversário inválida"
+        elif tel.iloc[i] in vistos:
+            motivo = "telefone duplicado"
+        else:
+            motivo = ""
+            vistos.add(tel.iloc[i])
+        motivos.append(motivo)
+
+    motivos = pd.Series(motivos, index=df.index, dtype=object)
+    ok = motivos == ""
+
+    validas = pd.DataFrame({
+        "nome": nome[ok],
+        "telefone": tel[ok],
+        "dia": dia[ok].astype(int),
+        "mes": mes[ok].astype(int),
+    }).reset_index(drop=True)
+    invalidas = df[~ok].assign(motivo=motivos[~ok]).reset_index(drop=True)
+    return validas, invalidas
+
+
 # ---------- Leitura e gravação (RF02, RF04) ----------
+def _abas_existentes() -> list:
+    """Nomes das abas do arquivo (lista vazia se o arquivo ainda não existe)."""
+    if not ARQUIVO.exists():
+        return []
+    try:
+        with pd.ExcelFile(ARQUIVO) as xls:
+            return list(xls.sheet_names)
+    except PermissionError:
+        raise  # o app avisa para fechar o Excel
+    except Exception as erro:  # arquivo corrompido, vazio ou que não é um Excel de verdade
+        logger.exception("Falha ao abrir %s", ARQUIVO)
+        raise ErroDeDados(
+            f"Não foi possível abrir o arquivo {ARQUIVO.name}. "
+            "Ele pode estar corrompido ou não ser um Excel válido. Confira se abre no Excel."
+        ) from erro
+
+
 def _ler_aba(aba: str, colunas: list) -> pd.DataFrame:
     """Lê uma aba do Excel. Se o arquivo ou a aba não existir, devolve uma tabela vazia."""
-    if not ARQUIVO.exists():
+    if aba not in _abas_existentes():
         return pd.DataFrame(columns=colunas)
-    with pd.ExcelFile(ARQUIVO) as xls:
-        if aba not in xls.sheet_names:
-            return pd.DataFrame(columns=colunas)
+    try:
         # dtype={"telefone": str} evita que o Excel apague zeros à esquerda do telefone
-        return pd.read_excel(xls, sheet_name=aba, dtype={"telefone": str})[colunas]
+        df = pd.read_excel(ARQUIVO, sheet_name=aba, dtype={"telefone": str})
+    except PermissionError:
+        raise
+    except Exception as erro:
+        logger.exception("Falha ao ler a aba %s", aba)
+        raise ErroDeDados(f"Não foi possível ler a aba '{aba}' do arquivo {ARQUIVO.name}.") from erro
+
+    faltando = [c for c in colunas if c not in df.columns]
+    if faltando:
+        raise ErroDeDados(
+            f"A aba '{aba}' do arquivo {ARQUIVO.name} não tem a(s) coluna(s): {', '.join(faltando)}."
+        )
+    return df[colunas]
 
 
 def carregar() -> pd.DataFrame:
-    """Lista de clientes."""
+    """Lista de clientes (como está na planilha, sem corrigir nada)."""
     return _ler_aba(ABA, COLUNAS)
 
 
 def carregar_contatos() -> pd.DataFrame:
     """Histórico de contatos e pedidos."""
     df = _ler_aba(ABA_CONTATOS, COLUNAS_CONTATOS)
-    df["ano_aniversario"] = df["ano_aniversario"].astype(int)
+    # Número inválido vira 0 em vez de derrubar o sistema
+    df["ano_aniversario"] = pd.to_numeric(df["ano_aniversario"], errors="coerce").fillna(0).astype(int)
     # Garante que a data fique como texto AAAA-MM-DD (evita o Excel trocar o formato)
     df["data_contato"] = df["data_contato"].astype(str).str[:10]
     return df
 
 
 def salvar_tudo(clientes: pd.DataFrame, contatos: pd.DataFrame) -> None:
-    """Grava as duas abas no mesmo arquivo (precisa gravar as duas para não perder nenhuma)."""
-    with pd.ExcelWriter(ARQUIVO, engine="openpyxl") as escritor:
-        clientes.to_excel(escritor, sheet_name=ABA, index=False)
-        contatos.to_excel(escritor, sheet_name=ABA_CONTATOS, index=False)
+    """Grava as duas abas no mesmo arquivo (precisa gravar as duas para não perder nenhuma).
+
+    A gravação é feita em um arquivo temporário e só depois troca o original. Assim, se algo
+    falhar no meio, o clientes.xlsx não fica corrompido.
+    """
+    temporario = ARQUIVO.with_name(ARQUIVO.name + ".tmp")
+    try:
+        with pd.ExcelWriter(temporario, engine="openpyxl") as escritor:
+            clientes.to_excel(escritor, sheet_name=ABA, index=False)
+            contatos.to_excel(escritor, sheet_name=ABA_CONTATOS, index=False)
+        os.replace(temporario, ARQUIVO)  # se o Excel estiver aberto no Windows, gera PermissionError
+    finally:
+        temporario.unlink(missing_ok=True)  # apaga o temporário, tenha dado certo ou não
 
 
 def salvar(clientes: pd.DataFrame) -> None:
@@ -103,11 +196,8 @@ def salvar(clientes: pd.DataFrame) -> None:
 
 def garantir_arquivo() -> None:
     """Cria o clientes.xlsx (ou a aba que faltar) para o Power BI sempre encontrar as duas abas."""
-    precisa = not ARQUIVO.exists()
-    if not precisa:
-        with pd.ExcelFile(ARQUIVO) as xls:
-            precisa = ABA not in xls.sheet_names or ABA_CONTATOS not in xls.sheet_names
-    if precisa:
+    abas = _abas_existentes()
+    if ABA not in abas or ABA_CONTATOS not in abas:
         salvar_tudo(carregar(), carregar_contatos())
 
 
@@ -169,14 +259,17 @@ def remover_cliente(telefone: str) -> None:
 
 # ---------- Alertas (RF03, RF05, RF07) ----------
 def proximo_aniversario(dia: int, mes: int, hoje: date | None = None) -> date:
-    """Próxima data de aniversário a partir de hoje (trata 29/02 em ano não bissexto)."""
+    """Próxima data de aniversário a partir de hoje (trata 29/02 em ano não bissexto).
+
+    Data inexistente (ex.: 31/04) gera ValueError, em vez de ser corrigida em silêncio.
+    """
     hoje = hoje or date.today()
 
     def data_no_ano(ano: int) -> date:
-        try:
-            return date(ano, mes, dia)
-        except ValueError:  # 29/02 em ano não bissexto: comemora em 28/02
+        # 29/02 em ano não bissexto: comemora-se em 28/02
+        if (mes, dia) == (2, 29) and not calendar.isleap(ano):
             return date(ano, 2, 28)
+        return date(ano, mes, dia)
 
     candidata = data_no_ano(hoje.year)
     return candidata if candidata >= hoje else data_no_ano(hoje.year + 1)
@@ -191,8 +284,9 @@ def classificar(dias: int) -> str:
 
 
 def tabela_alertas(df: pd.DataFrame, hoje: date | None = None) -> pd.DataFrame:
+    """Calcula dias restantes e status. Linhas inválidas da planilha são ignoradas (não derrubam o app)."""
     hoje = hoje or date.today()
-    df = df.copy()
+    df, _ = separar_validas(df)
     if df.empty:
         return df.assign(proximo_aniversario=[], dias_restantes=[], status=[])
     df["proximo_aniversario"] = [
@@ -221,7 +315,7 @@ def adicionar_contato(tabela: pd.DataFrame, contatos: pd.DataFrame) -> pd.DataFr
         ]
         if achou.empty:
             return "Não contatado"
-        return TEXTO_CONTATO[achou.iloc[0]["pedido_confirmado"]]
+        return TEXTO_CONTATO.get(achou.iloc[0]["pedido_confirmado"], "Aguardando resposta")
 
     tabela["contato"] = tabela.apply(situacao, axis=1)
     return tabela

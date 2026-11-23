@@ -1,4 +1,4 @@
-"""Interface de cadastro e alertas - Bolos da Lyz (versão 2).
+"""Interface de cadastro e alertas - Bolos da Lyz (versão 3).
 Execute com:  streamlit run app.py
 """
 import streamlit as st  # biblioteca que cria a interface web
@@ -9,17 +9,41 @@ st.set_page_config(page_title="Bolos da Lyz", page_icon="🎂", layout="centered
 st.title("🎂 Bolos da Lyz - Aniversários")
 
 
-def salvar_seguro(funcao, *argumentos):
-    """Executa uma gravação e avisa se o Excel estiver aberto (o Windows trava o arquivo)."""
+def executar_seguro(funcao, *argumentos):
+    """Executa uma leitura/gravação e mostra uma mensagem amigável se algo der errado."""
     try:
         return funcao(*argumentos)
     except PermissionError:
+        # O Windows trava o arquivo quando ele está aberto no Excel
         st.error("Feche o arquivo clientes.xlsx no Excel e tente novamente.")
+        st.stop()
+    except logica.ErroDeDados as erro:
+        # Arquivo corrompido, aba ou coluna ausente: a mensagem já vem explicada
+        st.error(str(erro))
         st.stop()
 
 
+def inteiro_ou(valor, padrao, minimo, maximo):
+    """Converte para inteiro dentro dos limites; se o valor for inválido, usa o padrão."""
+    try:
+        return min(max(int(valor), minimo), maximo)
+    except (TypeError, ValueError):
+        return padrao
+
+
+def texto_ou_vazio(valor):
+    """Evita mostrar 'nan' quando a célula da planilha está vazia."""
+    return "" if valor is None or valor != valor else str(valor)
+
+
 # Garante que o clientes.xlsx exista, com as abas "clientes" e "contatos"
-salvar_seguro(logica.garantir_arquivo)
+executar_seguro(logica.garantir_arquivo)
+
+# Carrega os dados uma vez por execução da tela
+clientes = executar_seguro(logica.carregar)
+contatos = executar_seguro(logica.carregar_contatos)
+# Linhas com dados inválidos (ex.: digitadas direto na planilha) ficam de fora dos alertas
+_, invalidas = logica.separar_validas(clientes)
 
 aba_cadastro, aba_alertas, aba_clientes = st.tabs(
     ["➕ Cadastrar", "🔔 Alertas", "📋 Clientes"]
@@ -37,19 +61,24 @@ with aba_cadastro:
         enviado = st.form_submit_button("Salvar cliente")
 
     if enviado:
-        ok, msg = salvar_seguro(logica.adicionar_cliente, nome, telefone, dia, mes)
+        ok, msg = executar_seguro(logica.adicionar_cliente, nome, telefone, dia, mes)
         (st.success if ok else st.error)(msg)
 
 # ---------------- Alertas ----------------
 with aba_alertas:
+    if not invalidas.empty:
+        st.warning(
+            f"{len(invalidas)} registro(s) com dados inválidos foram ignorados nos alertas. "
+            "Veja o motivo na aba Clientes."
+        )
+
     # Filtro de janela de tempo (RF07)
     janela = st.radio(
         "Janela de tempo", ["Todas", "30 dias", "60 dias"], horizontal=True
     )
 
-    contatos = logica.carregar_contatos()
     # Calcula dias restantes e status e acrescenta a situação do contato (RF08)
-    tabela = logica.adicionar_contato(logica.tabela_alertas(logica.carregar()), contatos)
+    tabela = logica.adicionar_contato(logica.tabela_alertas(clientes), contatos)
     # Mantém só quem está dentro das janelas de 30 ou 60 dias
     tabela = tabela[tabela["status"] != "Fora da janela"]
 
@@ -102,14 +131,14 @@ with aba_alertas:
 
         if situacao == "Não contatado":
             if botoes[1].button("📞 Contatei", key=f"contato_{tel}_{ano}"):
-                salvar_seguro(logica.registrar_contato, tel, linha["nome"], ano)
+                executar_seguro(logica.registrar_contato, tel, linha["nome"], ano)
                 st.rerun()  # recarrega a tela para mostrar o novo estado
         elif situacao == "Aguardando resposta":
             if botoes[1].button("✅ Pedido confirmado", key=f"sim_{tel}_{ano}"):
-                salvar_seguro(logica.atualizar_pedido, tel, ano, "Sim")
+                executar_seguro(logica.atualizar_pedido, tel, ano, "Sim")
                 st.rerun()
             if botoes[2].button("❌ Não fechou", key=f"nao_{tel}_{ano}"):
-                salvar_seguro(logica.atualizar_pedido, tel, ano, "Não")
+                executar_seguro(logica.atualizar_pedido, tel, ano, "Não")
                 st.rerun()
 
 # ---------------- Lista de clientes ----------------
@@ -118,42 +147,54 @@ with aba_clientes:
     if "aviso" in st.session_state:
         st.success(st.session_state.pop("aviso"))
 
-    df = logica.carregar()
-    st.dataframe(df, hide_index=True)
+    st.dataframe(clientes, hide_index=True)
 
-    if not df.empty:
+    # Registros com problema, com o motivo, para a confeiteira corrigir
+    if not invalidas.empty:
+        with st.expander(f"⚠️ {len(invalidas)} registro(s) com problema"):
+            st.dataframe(invalidas, hide_index=True)
+
+    # Só dá para editar ou remover quem tem telefone (é a chave do cliente)
+    com_telefone = clientes[clientes["telefone"].fillna("").astype(str).str.strip() != ""]
+
+    if not com_telefone.empty:
         # Exportação para Excel (RF10): lista de clientes com os alertas
-        exportacao = logica.adicionar_contato(
-            logica.tabela_alertas(df), logica.carregar_contatos()
-        )
-        st.download_button(
-            "⬇️ Baixar lista com alertas (Excel)",
-            data=logica.exportar_excel(exportacao),
-            file_name="clientes_alertas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        exportacao = logica.adicionar_contato(logica.tabela_alertas(clientes), contatos)
+        if not exportacao.empty:
+            st.download_button(
+                "⬇️ Baixar lista com alertas (Excel)",
+                data=logica.exportar_excel(exportacao),
+                file_name="clientes_alertas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
 
         st.divider()
         # Lista suspensa: o valor é o telefone, mas exibe "Nome (telefone)"
         escolhido = st.selectbox(
             "Selecione um cliente",
-            df["telefone"],
-            format_func=lambda t: f"{df.loc[df['telefone'] == t, 'nome'].iloc[0]} ({t})",
+            com_telefone["telefone"],
+            format_func=lambda t: (
+                f"{texto_ou_vazio(com_telefone.loc[com_telefone['telefone'] == t, 'nome'].iloc[0])} ({t})"
+            ),
         )
-        atual = df[df["telefone"] == escolhido].iloc[0]
+        atual = com_telefone[com_telefone["telefone"] == escolhido].iloc[0]
 
         # Edição (RF02): o formulário já vem preenchido com os dados atuais
         st.subheader("Editar cliente")
         with st.form(f"form_editar_{escolhido}"):
-            novo_nome = st.text_input("Nome", value=atual["nome"])
-            novo_tel = st.text_input("Telefone (com DDD)", value=atual["telefone"])
+            novo_nome = st.text_input("Nome", value=texto_ou_vazio(atual["nome"]))
+            novo_tel = st.text_input("Telefone (com DDD)", value=texto_ou_vazio(atual["telefone"]))
             e1, e2 = st.columns(2)
-            novo_dia = e1.number_input("Dia", min_value=1, max_value=31, value=int(atual["dia"]), step=1)
-            novo_mes = e2.number_input("Mês", min_value=1, max_value=12, value=int(atual["mes"]), step=1)
+            novo_dia = e1.number_input(
+                "Dia", min_value=1, max_value=31, value=inteiro_ou(atual["dia"], 1, 1, 31), step=1
+            )
+            novo_mes = e2.number_input(
+                "Mês", min_value=1, max_value=12, value=inteiro_ou(atual["mes"], 1, 1, 12), step=1
+            )
             salvou = st.form_submit_button("Salvar alterações")
 
         if salvou:
-            ok, msg = salvar_seguro(
+            ok, msg = executar_seguro(
                 logica.editar_cliente, escolhido, novo_nome, novo_tel, novo_dia, novo_mes
             )
             if ok:
@@ -164,5 +205,5 @@ with aba_clientes:
 
         # Remoção
         if st.button("🗑️ Remover este cliente"):
-            salvar_seguro(logica.remover_cliente, escolhido)
+            executar_seguro(logica.remover_cliente, escolhido)
             st.rerun()
