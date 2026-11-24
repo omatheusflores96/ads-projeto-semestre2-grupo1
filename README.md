@@ -19,6 +19,7 @@ O projeto percorre, em pequena escala, o fluxo de um pipeline de dados: **ingest
 * Botão de WhatsApp (link `wa.me`) com mensagem pronta para cada cliente em alerta. O envio é sempre feito pela confeiteira.
 * Registro de contatos e pedidos e cálculo da **taxa de conversão** (pedidos confirmados ÷ contatos feitos).
 * Exportação da lista de clientes com os alertas em Excel.
+* Tratamento de erros: arquivo corrompido, aba ou coluna ausente geram mensagens claras, e registros inválidos da planilha são ignorados nos alertas e listados com o motivo.
 * Painel no Power BI com os indicadores e os alertas.
 
 ## Arquitetura de dados
@@ -91,14 +92,13 @@ Medidas definidas em `medidas_dax.txt`: `Contatos Feitos`, `Pedidos Confirmados`
 | `requirements.txt` | Dependências do projeto |
 | `powerquery_contatos.m` e `powerquery_clientes.m` | Consultas do Power BI que leem o Excel |
 | `medidas_dax.txt` | Medidas do Power BI |
-| `gráficosBolosDaLyz.pbix` | Painel do Power BI |
-| `dados_exemplo/clientes_exemplo.xlsx` | Base fictícia para testar o sistema e o painel |
+| `.gitignore` | Impede o envio de arquivos com dados reais e de arquivos temporários |
 
 ## Como executar (reprodução do pipeline)
 Pré-requisito: **Python 3.10 ou superior**.
 
 1. Clone o repositório:
-   `git clone https://github.com/omatheusflores96/anuncios-projeto-semestre2-grupo1.git`
+   `git clone https://github.com/omatheusflores96/ads-projeto-semestre2-grupo1.git`
 2. Acesse a branch de desenvolvimento:
    `git checkout develop`
 3. (Recomendado) Crie e ative um ambiente virtual:
@@ -107,8 +107,8 @@ Pré-requisito: **Python 3.10 ou superior**.
 4. Instale as dependências:
    `pip install -r requirements.txt`
 5. Rode o sistema (abre no navegador em `http://localhost:8501`):
-   `streamlit run app.py`
-6. Rode os testes (se nada aparecer além de "Todos os testes passaram", está tudo certo):
+   `python -m streamlit run app.py`
+6. Rode os testes (se aparecer "Todos os testes passaram", está tudo certo):
    `python teste_logica.py`
 
 O arquivo `clientes.xlsx` é criado automaticamente no primeiro uso, na pasta onde o comando é executado.
@@ -118,16 +118,16 @@ O arquivo `clientes.xlsx` é criado automaticamente no primeiro uso, na pasta on
 | :--- | :--- | :--- |
 | `CLIENTES_XLSX` | Não | Caminho do arquivo Excel usado pelo sistema. Se não for definida, usa `clientes.xlsx` na pasta atual |
 
-Exemplos (defina antes de rodar o `streamlit run app.py`):
+Exemplos (defina antes de rodar o `python -m streamlit run app.py`):
 * Windows (cmd): `set CLIENTES_XLSX=C:\BolosDaLyz\clientes.xlsx`
 * Windows (PowerShell): `$env:CLIENTES_XLSX="C:\BolosDaLyz\clientes.xlsx"`
 * Linux/macOS: `export CLIENTES_XLSX=/caminho/clientes.xlsx`
 
-### Testar com dados fictícios
-A pasta `dados_exemplo` tem uma base com 26 clientes fictícios e 6 contatos registrados. Para usá-la, copie o arquivo para a raiz do projeto com o nome `clientes.xlsx`:
+### Dados utilizados
+Os dados reais da Bolos da Lyz ficam **somente no computador local**, no arquivo `clientes.xlsx`, que não é enviado ao GitHub (está no `.gitignore`). Para rodar o sistema:
 
-* Windows: `copy dados_exemplo\clientes_exemplo.xlsx clientes.xlsx`
-* Linux/macOS: `cp dados_exemplo/clientes_exemplo.xlsx clientes.xlsx`
+* Na primeira execução, o app cria um `clientes.xlsx` vazio na pasta do projeto. Cadastre os clientes pela aba **Cadastrar**.
+* Para usar uma planilha que já exista (aba `clientes`, com as colunas `nome`, `telefone`, `dia` e `mes`), coloque-a na pasta do projeto com o nome `clientes.xlsx` ou aponte para ela com a variável `CLIENTES_XLSX`.
 
 Os alertas dependem da data de hoje, então os clientes que aparecem nas janelas de 30 e 60 dias mudam conforme o dia da execução.
 
@@ -138,10 +138,18 @@ Os alertas dependem da data de hoje, então os clientes que aparecem nas janelas
 4. Clique em **Fechar e Aplicar** e crie as medidas do `medidas_dax.txt` (Modelagem → Nova medida, uma por vez).
 5. Sempre que houver dados novos, clique em **Atualizar**: o Power BI Desktop não atualiza sozinho.
 
-O arquivo `.pbix` do repositório aponta para o caminho do computador em que foi criado. Para abrir com outra base, ajuste a fonte em **Transformar dados → clientes → Fonte**.
+O arquivo `.pbix` não está no repositório, porque guarda uma cópia dos dados importados. Para reproduzir o painel, siga os passos acima usando o seu próprio `clientes.xlsx`.
 
 ## Validação com a cliente
-**[PREENCHER após a avaliação com a confeiteira: data, forma de aplicação, médias por critério e link para o relatório em PDF.]**
+* **Participante:** Lyzandra — Proprietária da confeitaria *Bolos da Lyz* (uso autorizado mediante consentimento formal).
+* **Data e formato:** 23/11/2026, sessão presencial assistida com duração de 40 minutos (conduzida por Matheus de Almeida Flores).
+* **Teste guiado de tarefas:** **100% de conclusão autônoma** (7 de 7 tarefas realizadas sozinha sem erros ou bloqueios, cobrindo cadastro, validação de telefone inválido, filtro de alertas de 30/60 dias, envio via WhatsApp, registro de contato/pedido, edição cadastral e leitura/exportação no Power BI).
+* **Métricas quantitativas:**
+  * **Média geral (Escala Likert 1–5):** **4,90 / 5,00** (nota 5,0 em *Utilidade*, *Confiabilidade* e *Ganho*; nota 4,67 em *Usabilidade*, com nota 4 na clareza do painel Power BI).
+  * **Net Promoter Score (NPS):** **10 / 10** (perfil promotor).
+* **Depoimento autorizado:** *"É um sistema diferente e muito interessante, que realmente ajuda na fidelização dos clientes."*
+* **Relatório completo:** disponível em PDF na entrega da disciplina (`relatorio_avaliacao_bolos_da_lyz.pdf`).
+
 
 ## Limitações e próximos passos
 * O Power BI Desktop precisa ser atualizado manualmente (evolução: Power BI Service com gateway).
@@ -149,5 +157,5 @@ O arquivo `.pbix` do repositório aponta para o caminho do computador em que foi
 * Evoluções previstas: exportação em CSV, importação em lote de contatos, outras datas comemorativas (Dia das Mães, Páscoa e Natal) e histórico de pedidos e preferências.
 
 ## Observações
-* O `clientes.xlsx` real contém dados pessoais (nomes e telefones) e está no `.gitignore`: **não envie para o GitHub**. Use a base fictícia de `dados_exemplo` para demonstrações.
+* O `clientes.xlsx` real contém dados pessoais (nomes e telefones). Ele e o painel `.pbix` ficam apenas no computador local e estão no `.gitignore`: **não envie para o GitHub**.
 * Se o arquivo estiver aberto no Excel, o app avisa para fechá-lo antes de salvar.
